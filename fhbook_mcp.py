@@ -173,6 +173,13 @@ def book_goto_page(page: int) -> str:
 
 
 @mcp.tool()
+def book_export(out_dir: str | None = None) -> str:
+    """Save the full text of the open Giancoli chapter (all PDF pages) to <out_dir>/<title>.md,
+    with '--- S. n ---' page markers for citations. Default dir: ~/.cache/pruefung/_fhbook."""
+    return _call("/book_export", out=out_dir)
+
+
+@mcp.tool()
 def book_search(term: str) -> str:
     """Find pages of the open chapter containing `term` (case-insensitive), with short context."""
     t = term.replace("\\", "\\\\").replace("'", "\\'")

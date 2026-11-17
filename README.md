@@ -64,8 +64,10 @@ Fehlt Playwrights Firefox (z. B. nach einem Update), installiert `start` ihn bei
 | `screenshot` | Formeln, Abbildungen |
 | `section_dump` | ganzen Moodle-Abschnitt/Lernpfad auf einmal als Text (+ Dateien) in den Cache |
 | `download` | Moodle-Dateien (PDFs) mit der Browser-Session speichern — per URL, Linktext oder aktuellem Tab |
-| `book_info`, `book_read_pages`, `book_search`, `book_goto_page` | Giancoli-PDF (ein PDF pro Kapitel) |
+| `book_info`, `book_read_pages`, `book_search`, `book_goto_page`, `book_export` | Giancoli-PDF (ein PDF pro Kapitel) |
 | `run_js` | Notnagel für ungewöhnliche Seiten |
+
+Tests: `uv run --with playwright --with pytest pytest tests -q` (headless Firefox, lokale Fixtures).
 
 Ohne Claude geht's auch per CLI: `uv run --script fhbook.py start` / `read` / `links Giancoli` / `click "Kapitel 7"`.
 

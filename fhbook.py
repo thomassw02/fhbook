@@ -25,6 +25,7 @@ Endpoints (GET unless noted):
   /section_dump?filter=&out=
                    read every page/book of the current Moodle section into one
                    .md file (out dir), download its files to out/files
+  /book_export?out=  all pages of the open Pearson/Apryse book PDF -> out/<title>.md
   POST /eval       run JS body in current tab's main frame, return JSON
 """
 import json
@@ -43,6 +44,17 @@ BASE = f"http://127.0.0.1:{PORT}"
 START_URL = os.environ.get("FHBOOK_START_URL", "https://moodle.technikum-wien.at")
 DOWNLOADS = Path(os.environ.get("FHBOOK_DOWNLOADS", Path.home() / "Downloads/fhbook"))
 CACHE = Path(os.environ.get("FHBOOK_CACHE", Path.home() / ".cache/pruefung/_fhbook"))
+NO_BOOK = "error: no book viewer on current tab — open a 'Giancoli: Kapitel …' link first"
+# Apryse WebViewer: all page texts of the open PDF, or null if there is no viewer (same lookup as fhbook_mcp._INST).
+BOOK_JS = """async () => {
+  const inst = (() => { try { return window.getInstance(document.getElementById('wc-viewer')) || window.getInstance() }
+                        catch (e) { try { return window.getInstance() } catch (_) { return null } } })();
+  if (!inst) return null;
+  const doc = inst.Core.documentViewer.getDocument();
+  const pages = [];
+  for (let p = 1; p <= doc.getPageCount(); p++) pages.push(await doc.loadPageText(p));
+  return pages;
+}"""
 READ_MODS = {"page", "book", "lesson", "label"}
 FILE_MODS = {"resource", "folder"}
 CLICKABLE = "a, button, [role=button], [role=link], [onclick]"
@@ -275,6 +287,25 @@ class Browser:
         dest.write_text("\n".join(parts), encoding="utf-8")
         return f"saved {dest}\n" + "\n".join(report)
 
+    def book_export(self, q):
+        """Write the full text of the open book chapter to <out>/<title>.md with page markers."""
+        pg = self.page()
+        pages = None
+        for f in pg.frames:
+            try:
+                pages = f.evaluate(BOOK_JS)
+            except Exception:
+                continue
+            if pages is not None:
+                break
+        if not pages:
+            return NO_BOOK
+        out_dir = Path(q.get("out") or CACHE).expanduser()
+        out_dir.mkdir(parents=True, exist_ok=True)
+        dest = out_dir / f"{safe_name(pg.title())}.md"
+        dest.write_text("\n".join(f"--- S. {i} ---\n{t}\n" for i, t in enumerate(pages, 1)), encoding="utf-8")
+        return f"saved {dest} ({len(pages)} pages)"
+
     def eval(self, js):
         return json.dumps(self.page().evaluate(js), ensure_ascii=False, default=str)
 
@@ -309,7 +340,7 @@ def start():
                 u = urllib.parse.urlparse(self.path)
                 q = {k: v[0] for k, v in urllib.parse.parse_qs(u.query).items()}
                 fn = getattr(br, u.path.strip("/") or "read", None)
-                if u.path.strip("/") not in ("read", "links", "goto", "click", "back", "tabs", "tab", "shot", "download", "section_dump", "") or fn is None:
+                if u.path.strip("/") not in ("read", "links", "goto", "click", "back", "tabs", "tab", "shot", "download", "section_dump", "book_export", "") or fn is None:
                     return self._reply(404, "unknown endpoint")
                 try:
                     self._reply(200, fn(q))
@@ -356,6 +387,6 @@ if __name__ == "__main__":
     elif cmd == "eval":
         print(call("/eval", rest[0].encode()))
     else:
-        keys = {"links": "filter", "goto": "url", "click": "text", "tab": "i", "shot": "out", "download": "url", "section_dump": "filter"}
+        keys = {"links": "filter", "goto": "url", "click": "text", "tab": "i", "shot": "out", "download": "url", "section_dump": "filter", "book_export": "out"}
         qs = urllib.parse.urlencode({keys[cmd]: rest[0]}) if rest and cmd in keys else ""
         print(call(f"/{cmd}" + (f"?{qs}" if qs else "")))
