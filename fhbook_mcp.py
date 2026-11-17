@@ -27,10 +27,13 @@ SHOT = Path(os.environ.get("FHBOOK_PROFILE", Path.home() / ".local/share/fhbook"
 mcp = FastMCP("fhbook")
 
 
-def _call(path: str, **q) -> str:
+LONG = 900  # s — section_dump/book_export walk many pages
+
+
+def _call(path: str, timeout: int = 120, **q) -> str:
     qs = urllib.parse.urlencode({k: v for k, v in q.items() if v is not None})
     try:
-        with urllib.request.urlopen(f"{BASE}{path}{'?' + qs if qs else ''}", timeout=120) as r:
+        with urllib.request.urlopen(f"{BASE}{path}{'?' + qs if qs else ''}", timeout=timeout) as r:
             return r.read().decode()
     except urllib.error.HTTPError as e:
         return e.read().decode()
@@ -125,7 +128,7 @@ def section_dump(filter: str | None = None, out_dir: str | None = None) -> str:
     and listed. Optional `filter` restricts to activities whose text/URL contains it.
     Default dir: ~/.cache/pruefung/_fhbook. Returns the .md path + a per-activity report.
     """
-    return _call("/section_dump", filter=filter, out=out_dir)
+    return _call("/section_dump", timeout=LONG, filter=filter, out=out_dir)
 
 
 @mcp.tool()
@@ -176,7 +179,7 @@ def book_goto_page(page: int) -> str:
 def book_export(out_dir: str | None = None) -> str:
     """Save the full text of the open Giancoli chapter (all PDF pages) to <out_dir>/<title>.md,
     with '--- S. n ---' page markers for citations. Default dir: ~/.cache/pruefung/_fhbook."""
-    return _call("/book_export", out=out_dir)
+    return _call("/book_export", timeout=LONG, out=out_dir)
 
 
 @mcp.tool()

@@ -24,6 +24,8 @@ class Handler(SimpleHTTPRequestHandler):
         super().do_GET()
 
     def guess_type(self, path):
+        if "download_folder" in str(path):
+            return "application/zip"
         return "text/html" if str(path).endswith(".php") else super().guess_type(path)
 
     def log_message(self, *a):

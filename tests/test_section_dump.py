@@ -12,8 +12,10 @@ def test_section_dump(browser, site, tmp_path):
     assert "NAVJUNK" not in md
     assert "Ganzes Buch Kapitel 1 und 2" in md            # book read via print view
     assert (out / "files" / "a.pdf").exists()
+    assert (out / "files" / "download_folder.php").read_bytes() == b"PK zip"   # whole folder as zip
     assert "skipped: Giancoli: Kapitel 4 (lti)" in r
     assert "skipped: Selbsttest (quiz)" in r
+    assert "failed: Kaputt" in r                          # one broken activity doesn't abort the dump
     assert "Extern" not in r                              # non-activity links ignored
     assert browser.page().url.endswith("/section.html")   # current tab unchanged
     assert len(browser.ctx.pages) == 1                    # helper tab closed

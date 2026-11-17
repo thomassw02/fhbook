@@ -84,6 +84,7 @@ class Browser:
     def __init__(self, ctx):
         self.ctx = ctx
         self.cur = ctx.pages[0] if ctx.pages else ctx.new_page()
+        self._hp = None  # helper tab used by section_dump
         ctx.on("page", self._on_page)
 
     def _on_page(self, pg):
@@ -253,39 +254,50 @@ class Browser:
         title = cur.title()
         acts = [a for a in self._activities() if not flt or flt in (a[0] + " " + a[1]).lower()]
         parts, report = [f"# {title}\n{cur.url}\n"], []
-        hp = None
+        self._hp = None
         try:
             for text, url, mod in acts:
-                if mod in FILE_MODS:
-                    r = self.download({"url": url, "out": str(out_dir / "files")})
-                    if r == SESSION_EXPIRED:
-                        return SESSION_EXPIRED
-                    report.append(f"file: {text} — {r}")
-                    continue
-                if mod not in READ_MODS:
-                    report.append(f"skipped: {text} ({mod})")
-                    continue
-                if mod == "book":
-                    qid = urllib.parse.parse_qs(urllib.parse.urlparse(url).query).get("id", [""])[0]
-                    url = urllib.parse.urljoin(url, f"tool/print/index.php?id={qid}")
-                if hp is None:
-                    hp = self.ctx.new_page()
-                hp.goto(url, timeout=60000)
-                self.settle(hp)
-                if login_wall(hp.url):
+                try:
+                    line = self._dump_one(text, url, mod, out_dir, parts)
+                except Exception as e:
+                    line = f"failed: {text} — {str(e).splitlines()[0]}"
+                if line == SESSION_EXPIRED:
                     return SESSION_EXPIRED
-                main = hp.locator("#region-main")
-                body = (main.first if main.count() else hp.locator("body")).inner_text(timeout=10000).strip()
-                parts.append(f"=== {text} ===\n{url}\n\n{body}\n")
-                report.append(f"ok: {text}")
+                report.append(line)
         finally:
-            if hp is not None:
-                hp.close()
+            if self._hp is not None:
+                self._hp.close()
+            self._hp = None
             self.cur = cur
         out_dir.mkdir(parents=True, exist_ok=True)
         dest = out_dir / f"{safe_name(title)}.md"
         dest.write_text("\n".join(parts), encoding="utf-8")
-        return f"saved {dest}\n" + "\n".join(report)
+        return f"saved {dest}\n" + ("\n".join(report) or "no Moodle activities found on this tab")
+
+    def _dump_one(self, text, url, mod, out_dir, parts):
+        """One activity of section_dump: append its text to `parts` or download it. Returns a report line
+        or SESSION_EXPIRED. Text pages load in a lazily created helper tab (self._hp)."""
+        qid = urllib.parse.parse_qs(urllib.parse.urlparse(url).query).get("id", [""])[0]
+        if mod in FILE_MODS:
+            if mod == "folder":  # whole folder as one zip instead of only its first file
+                url = urllib.parse.urljoin(url, f"download_folder.php?id={qid}")
+            r = self.download({"url": url, "out": str(out_dir / "files")})
+            return r if r == SESSION_EXPIRED else f"file: {text} — {r}"
+        if mod not in READ_MODS:
+            return f"skipped: {text} ({mod})"
+        if mod == "book":  # print view = whole book on one page
+            url = urllib.parse.urljoin(url, f"tool/print/index.php?id={qid}")
+        if self._hp is None:
+            self._hp = self.ctx.new_page()
+        hp = self._hp
+        hp.goto(url, timeout=60000)
+        self.settle(hp)
+        if login_wall(hp.url):
+            return SESSION_EXPIRED
+        main = hp.locator("#region-main")
+        body = (main.first if main.count() else hp.locator("body")).inner_text(timeout=10000).strip()
+        parts.append(f"=== {text} ===\n{url}\n\n{body}\n")
+        return f"ok: {text}"
 
     def book_export(self, q):
         """Write the full text of the open book chapter to <out>/<title>.md with page markers."""
