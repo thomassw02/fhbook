@@ -53,6 +53,8 @@ haben keine Lizenz und zeigen nur Schlösser.
 
 Fenster geschlossen → Login weg, neu starten und wieder einloggen.
 
+Fehlt Playwrights Firefox (z. B. nach einem Update), installiert `start` ihn beim ersten Start automatisch nach.
+
 ## Tools
 
 | Tool | Zweck |
@@ -60,6 +62,7 @@ Fenster geschlossen → Login weg, neu starten und wieder einloggen.
 | `start_browser` | Fenster öffnen |
 | `read_page`, `list_links`, `click`, `goto`, `back`, `tabs`, `switch_tab` | Moodle/Lernpfade navigieren |
 | `screenshot` | Formeln, Abbildungen |
+| `download` | Moodle-Dateien (PDFs) mit der Browser-Session speichern — per URL, Linktext oder aktuellem Tab |
 | `book_info`, `book_read_pages`, `book_search`, `book_goto_page` | Giancoli-PDF (ein PDF pro Kapitel) |
 | `run_js` | Notnagel für ungewöhnliche Seiten |
 
@@ -70,6 +73,7 @@ Ohne Claude geht's auch per CLI: `uv run --script fhbook.py start` / `read` / `l
 - `FHBOOK_PORT` (Standard 9334) — lokaler Port, nur `127.0.0.1`
 - `FHBOOK_PROFILE` — Browser-Profilordner
 - `FHBOOK_START_URL` — Startseite (Standard: FH-Technikum-Moodle)
+- `FHBOOK_DOWNLOADS` — Zielordner für `download` (Standard `~/Downloads/fhbook`)
 
 ## Hinweise
 

@@ -104,6 +104,19 @@ def screenshot(full_page: bool = False) -> Image:
 
 
 @mcp.tool()
+def download(url: str | None = None, text: str | None = None, nth: int = 0,
+             out_dir: str | None = None) -> str:
+    """Save a file (e.g. Moodle PDF) using the browser's login cookies.
+
+    Give `url` (absolute or relative to the current tab), or `text` of a link on the
+    current tab, or neither to save the current tab's URL (e.g. a PDF open in the viewer).
+    Moodle resource view pages are followed to their pluginfile. Default dir: ~/Downloads/fhbook.
+    Returns the saved path — read it afterwards with markitdown / Read.
+    """
+    return _call("/download", url=url, text=text, nth=nth if text else None, out=out_dir)
+
+
+@mcp.tool()
 def run_js(script: str) -> str:
     """Evaluate a JS expression/arrow function in the current tab's main frame (for odd page structures). Read-only use."""
     req = urllib.request.Request(BASE + "/eval", data=script.encode())

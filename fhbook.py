@@ -18,10 +18,16 @@ Endpoints (GET unless noted):
   /tabs            list tabs
   /tab?i=          make tab i current
   /shot?out=       full-page screenshot of current tab
+  /download?url=|text=&nth=&out=
+                   save a file (e.g. Moodle PDF) with the browser's cookies.
+                   url: direct/relative URL; text: href of matching link;
+                   neither: current tab URL. out = target dir.
   POST /eval       run JS body in current tab's main frame, return JSON
 """
 import json
 import os
+import re
+import subprocess
 import sys
 import urllib.parse
 import urllib.request
@@ -32,6 +38,8 @@ PORT = int(os.environ.get("FHBOOK_PORT", "9334"))
 PROFILE = Path(os.environ.get("FHBOOK_PROFILE", Path.home() / ".local/share/fhbook/profile-ff"))
 BASE = f"http://127.0.0.1:{PORT}"
 START_URL = os.environ.get("FHBOOK_START_URL", "https://moodle.technikum-wien.at")
+DOWNLOADS = Path(os.environ.get("FHBOOK_DOWNLOADS", Path.home() / "Downloads/fhbook"))
+CLICKABLE = "a, button, [role=button], [role=link], [onclick]"
 
 LINKS_JS = """() => {
   const els = [...document.querySelectorAll('a[href], button, [role=button], [role=link], [onclick]')];
@@ -98,21 +106,25 @@ class Browser:
         self.settle(pg)
         return f"URL: {pg.url}\nTITLE: {pg.title()}"
 
-    def click(self, q):
-        text, nth = q["text"], int(q.get("nth", 0))
-        pg = self.page()
-        before = len(self.ctx.pages)
+    def _find(self, text):
+        """All clickable elements (all frames) whose text contains `text`, as (frame, locator)."""
         hits = []
-        for f in pg.frames:
-            loc = f.locator("a, button, [role=button], [role=link], [onclick]").filter(has_text=text)
+        for f in self.page().frames:
+            loc = f.locator(CLICKABLE).filter(has_text=text)
             try:
                 c = loc.count()
             except Exception:
                 continue
-            hits += [loc.nth(i) for i in range(c)]
+            hits += [(f, loc.nth(i)) for i in range(c)]
+        return hits
+
+    def click(self, q):
+        text, nth = q["text"], int(q.get("nth", 0))
+        before = len(self.ctx.pages)
+        hits = self._find(text)
         if not hits:
             return f"no clickable element containing '{text}'"
-        el = hits[min(nth, len(hits) - 1)]
+        el = hits[min(nth, len(hits) - 1)][1]
         el.scroll_into_view_if_needed(timeout=5000)
         el.click(timeout=10000)
         pg.wait_for_timeout(1500)
@@ -141,14 +153,68 @@ class Browser:
         self.page().screenshot(path=out, full_page=q.get("full", "1") == "1")
         return out
 
+    def download(self, q):
+        """Fetch a file through the browser context (shares the Moodle session cookies) and save it."""
+        pg = self.page()
+        if q.get("url"):
+            url = urllib.parse.urljoin(pg.url, q["url"])
+        elif q.get("text"):
+            hits = self._find(q["text"])
+            if not hits:
+                return f"no link containing '{q['text']}'"
+            f, el = hits[min(int(q.get("nth", 0)), len(hits) - 1)]
+            href = el.get_attribute("href")
+            if not href or href.startswith("javascript"):
+                return f"element '{q['text']}' has no downloadable href"
+            url = urllib.parse.urljoin(f.url, href)
+        else:
+            url = pg.url
+        resp = self.ctx.request.get(url, timeout=60000)
+        ctype = resp.headers.get("content-type", "")
+        if resp.ok and "html" in ctype:
+            # Moodle mod/resource view page (embed/frame display): follow the pluginfile link inside.
+            m = re.search(r'https?://[^"\'\s<>]+/pluginfile\.php/[^"\'\s<>]+', resp.text())
+            if m:
+                url = m.group(0).replace("&amp;", "&")
+                resp = self.ctx.request.get(url, timeout=60000)
+                ctype = resp.headers.get("content-type", "")
+        if not resp.ok:
+            return f"error: HTTP {resp.status} for {url}"
+        if "html" in ctype:
+            return f"error: got an HTML page, not a file ({url}) — open the resource and retry, or pass its pluginfile URL"
+        name = ""
+        cd = resp.headers.get("content-disposition", "")
+        m = re.search(r"filename\*=(?:UTF-8'')?([^;]+)", cd, re.I) or re.search(r'filename="?([^";]+)"?', cd, re.I)
+        if m:
+            name = urllib.parse.unquote(m.group(1).strip())
+        name = Path(name or urllib.parse.unquote(urllib.parse.urlparse(url).path)).name or "download.bin"
+        out_dir = Path(q.get("out") or DOWNLOADS).expanduser()
+        out_dir.mkdir(parents=True, exist_ok=True)
+        dest = out_dir / name
+        body = resp.body()
+        dest.write_bytes(body)
+        return f"saved {dest} ({len(body)} bytes, {ctype.split(';')[0]})"
+
     def eval(self, js):
         return json.dumps(self.page().evaluate(js), ensure_ascii=False, default=str)
+
+
+def _launch(p):
+    """Launch persistent Firefox; install Playwright's Firefox once if it went missing (e.g. after an update)."""
+    try:
+        return p.firefox.launch_persistent_context(str(PROFILE), headless=False, no_viewport=True)
+    except Exception as e:
+        if "Executable doesn't exist" not in str(e):
+            raise
+        print("Playwright Firefox missing — installing ...", flush=True)
+        subprocess.run([sys.executable, "-m", "playwright", "install", "firefox"], check=True)
+        return p.firefox.launch_persistent_context(str(PROFILE), headless=False, no_viewport=True)
 
 
 def start():
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
-        ctx = p.firefox.launch_persistent_context(str(PROFILE), headless=False, no_viewport=True)
+        ctx = _launch(p)
         br = Browser(ctx)
         br.page().goto(START_URL)
 
@@ -163,7 +229,7 @@ def start():
                 u = urllib.parse.urlparse(self.path)
                 q = {k: v[0] for k, v in urllib.parse.parse_qs(u.query).items()}
                 fn = getattr(br, u.path.strip("/") or "read", None)
-                if u.path.strip("/") not in ("read", "links", "goto", "click", "back", "tabs", "tab", "shot", "") or fn is None:
+                if u.path.strip("/") not in ("read", "links", "goto", "click", "back", "tabs", "tab", "shot", "download", "") or fn is None:
                     return self._reply(404, "unknown endpoint")
                 try:
                     self._reply(200, fn(q))
@@ -210,6 +276,6 @@ if __name__ == "__main__":
     elif cmd == "eval":
         print(call("/eval", rest[0].encode()))
     else:
-        keys = {"links": "filter", "goto": "url", "click": "text", "tab": "i", "shot": "out"}
+        keys = {"links": "filter", "goto": "url", "click": "text", "tab": "i", "shot": "out", "download": "url"}
         qs = urllib.parse.urlencode({keys[cmd]: rest[0]}) if rest and cmd in keys else ""
         print(call(f"/{cmd}" + (f"?{qs}" if qs else "")))
