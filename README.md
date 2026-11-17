@@ -62,6 +62,7 @@ Fehlt Playwrights Firefox (z. B. nach einem Update), installiert `start` ihn bei
 | `start_browser` | Fenster öffnen |
 | `read_page`, `list_links`, `click`, `goto`, `back`, `tabs`, `switch_tab` | Moodle/Lernpfade navigieren |
 | `screenshot` | Formeln, Abbildungen |
+| `section_dump` | ganzen Moodle-Abschnitt/Lernpfad auf einmal als Text (+ Dateien) in den Cache |
 | `download` | Moodle-Dateien (PDFs) mit der Browser-Session speichern — per URL, Linktext oder aktuellem Tab |
 | `book_info`, `book_read_pages`, `book_search`, `book_goto_page` | Giancoli-PDF (ein PDF pro Kapitel) |
 | `run_js` | Notnagel für ungewöhnliche Seiten |
@@ -73,6 +74,7 @@ Ohne Claude geht's auch per CLI: `uv run --script fhbook.py start` / `read` / `l
 - `FHBOOK_PORT` (Standard 9334) — lokaler Port, nur `127.0.0.1`
 - `FHBOOK_PROFILE` — Browser-Profilordner
 - `FHBOOK_START_URL` — Startseite (Standard: FH-Technikum-Moodle)
+- `FHBOOK_CACHE` — Zielordner für `section_dump`/`book_export` (Standard `~/.cache/pruefung/_fhbook`)
 - `FHBOOK_DOWNLOADS` — Zielordner für `download` (Standard `~/Downloads/fhbook`)
 
 ## Hinweise

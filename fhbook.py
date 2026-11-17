@@ -22,6 +22,9 @@ Endpoints (GET unless noted):
                    save a file (e.g. Moodle PDF) with the browser's cookies.
                    url: direct/relative URL; text: href of matching link;
                    neither: current tab URL. out = target dir.
+  /section_dump?filter=&out=
+                   read every page/book of the current Moodle section into one
+                   .md file (out dir), download its files to out/files
   POST /eval       run JS body in current tab's main frame, return JSON
 """
 import json
@@ -39,6 +42,9 @@ PROFILE = Path(os.environ.get("FHBOOK_PROFILE", Path.home() / ".local/share/fhbo
 BASE = f"http://127.0.0.1:{PORT}"
 START_URL = os.environ.get("FHBOOK_START_URL", "https://moodle.technikum-wien.at")
 DOWNLOADS = Path(os.environ.get("FHBOOK_DOWNLOADS", Path.home() / "Downloads/fhbook"))
+CACHE = Path(os.environ.get("FHBOOK_CACHE", Path.home() / ".cache/pruefung/_fhbook"))
+READ_MODS = {"page", "book", "lesson", "label"}
+FILE_MODS = {"resource", "folder"}
 CLICKABLE = "a, button, [role=button], [role=link], [onclick]"
 SESSION_EXPIRED = "error: Moodle session expired — log in again in the fhbook window"
 
@@ -211,6 +217,64 @@ class Browser:
         dest.write_bytes(body)
         return f"saved {dest} ({len(body)} bytes, {ctype.split(';')[0]})"
 
+    def _activities(self):
+        """(text, absolute url, mod) for every Moodle activity link on the current tab, deduplicated."""
+        seen, out = set(), []
+        for f in self.page().frames:
+            try:
+                items = f.evaluate(LINKS_JS)
+            except Exception:
+                continue
+            for it in items:
+                url = urllib.parse.urljoin(f.url, it["href"]) if it["href"] else ""
+                m = re.search(r"/mod/(\w+)/", urllib.parse.urlparse(url).path)
+                if m and url not in seen:
+                    seen.add(url)
+                    out.append((it["text"], url, m.group(1)))
+        return out
+
+    def section_dump(self, q):
+        """Read all text activities of the current section into one .md, download its files; skip the rest."""
+        flt = q.get("filter", "").lower()
+        out_dir = Path(q.get("out") or CACHE).expanduser()
+        cur = self.page()
+        title = cur.title()
+        acts = [a for a in self._activities() if not flt or flt in (a[0] + " " + a[1]).lower()]
+        parts, report = [f"# {title}\n{cur.url}\n"], []
+        hp = None
+        try:
+            for text, url, mod in acts:
+                if mod in FILE_MODS:
+                    r = self.download({"url": url, "out": str(out_dir / "files")})
+                    if r == SESSION_EXPIRED:
+                        return SESSION_EXPIRED
+                    report.append(f"file: {text} — {r}")
+                    continue
+                if mod not in READ_MODS:
+                    report.append(f"skipped: {text} ({mod})")
+                    continue
+                if mod == "book":
+                    qid = urllib.parse.parse_qs(urllib.parse.urlparse(url).query).get("id", [""])[0]
+                    url = urllib.parse.urljoin(url, f"tool/print/index.php?id={qid}")
+                if hp is None:
+                    hp = self.ctx.new_page()
+                hp.goto(url, timeout=60000)
+                self.settle(hp)
+                if login_wall(hp.url):
+                    return SESSION_EXPIRED
+                main = hp.locator("#region-main")
+                body = (main.first if main.count() else hp.locator("body")).inner_text(timeout=10000).strip()
+                parts.append(f"=== {text} ===\n{url}\n\n{body}\n")
+                report.append(f"ok: {text}")
+        finally:
+            if hp is not None:
+                hp.close()
+            self.cur = cur
+        out_dir.mkdir(parents=True, exist_ok=True)
+        dest = out_dir / f"{safe_name(title)}.md"
+        dest.write_text("\n".join(parts), encoding="utf-8")
+        return f"saved {dest}\n" + "\n".join(report)
+
     def eval(self, js):
         return json.dumps(self.page().evaluate(js), ensure_ascii=False, default=str)
 
@@ -245,7 +309,7 @@ def start():
                 u = urllib.parse.urlparse(self.path)
                 q = {k: v[0] for k, v in urllib.parse.parse_qs(u.query).items()}
                 fn = getattr(br, u.path.strip("/") or "read", None)
-                if u.path.strip("/") not in ("read", "links", "goto", "click", "back", "tabs", "tab", "shot", "download", "") or fn is None:
+                if u.path.strip("/") not in ("read", "links", "goto", "click", "back", "tabs", "tab", "shot", "download", "section_dump", "") or fn is None:
                     return self._reply(404, "unknown endpoint")
                 try:
                     self._reply(200, fn(q))
@@ -292,6 +356,6 @@ if __name__ == "__main__":
     elif cmd == "eval":
         print(call("/eval", rest[0].encode()))
     else:
-        keys = {"links": "filter", "goto": "url", "click": "text", "tab": "i", "shot": "out", "download": "url"}
+        keys = {"links": "filter", "goto": "url", "click": "text", "tab": "i", "shot": "out", "download": "url", "section_dump": "filter"}
         qs = urllib.parse.urlencode({keys[cmd]: rest[0]}) if rest and cmd in keys else ""
         print(call(f"/{cmd}" + (f"?{qs}" if qs else "")))

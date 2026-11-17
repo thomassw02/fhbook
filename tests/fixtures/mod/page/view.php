@@ -1,0 +1,1 @@
+<html><head><title>Seite</title></head><body><nav>NAVJUNK</nav><div id="region-main">Inhalt der Seite</div></body></html>

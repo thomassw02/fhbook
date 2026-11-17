@@ -117,6 +117,18 @@ def download(url: str | None = None, text: str | None = None, nth: int = 0,
 
 
 @mcp.tool()
+def section_dump(filter: str | None = None, out_dir: str | None = None) -> str:
+    """Read a whole Moodle section/Lernpfad at once (open it first with goto/click).
+
+    Text of every page/book/lesson/label activity goes into one .md file, files
+    (resource/folder) are downloaded to <out_dir>/files; LTI/quiz/forum/... are skipped
+    and listed. Optional `filter` restricts to activities whose text/URL contains it.
+    Default dir: ~/.cache/pruefung/_fhbook. Returns the .md path + a per-activity report.
+    """
+    return _call("/section_dump", filter=filter, out=out_dir)
+
+
+@mcp.tool()
 def run_js(script: str) -> str:
     """Evaluate a JS expression/arrow function in the current tab's main frame (for odd page structures). Read-only use."""
     req = urllib.request.Request(BASE + "/eval", data=script.encode())
