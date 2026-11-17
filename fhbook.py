@@ -40,6 +40,18 @@ BASE = f"http://127.0.0.1:{PORT}"
 START_URL = os.environ.get("FHBOOK_START_URL", "https://moodle.technikum-wien.at")
 DOWNLOADS = Path(os.environ.get("FHBOOK_DOWNLOADS", Path.home() / "Downloads/fhbook"))
 CLICKABLE = "a, button, [role=button], [role=link], [onclick]"
+SESSION_EXPIRED = "error: Moodle session expired — log in again in the fhbook window"
+
+
+def login_wall(url: str) -> bool:
+    """True if `url` is Moodle's login page (session gone, request got redirected)."""
+    return "/login/index.php" in urllib.parse.urlparse(url).path
+
+
+def safe_name(s: str) -> str:
+    """Filesystem-safe single path component derived from a page/file title."""
+    name = re.sub(r'[/\\:*?"<>|\x00-\x1f]', "_", s).strip()[:120].strip()
+    return name or "untitled"
 
 LINKS_JS = """() => {
   const els = [...document.querySelectorAll('a[href], button, [role=button], [role=link], [onclick]')];
@@ -170,6 +182,8 @@ class Browser:
         else:
             url = pg.url
         resp = self.ctx.request.get(url, timeout=60000)
+        if login_wall(resp.url):
+            return SESSION_EXPIRED
         ctype = resp.headers.get("content-type", "")
         if resp.ok and "html" in ctype:
             # Moodle mod/resource view page (embed/frame display): follow the pluginfile link inside.
@@ -177,6 +191,8 @@ class Browser:
             if m:
                 url = m.group(0).replace("&amp;", "&")
                 resp = self.ctx.request.get(url, timeout=60000)
+                if login_wall(resp.url):
+                    return SESSION_EXPIRED
                 ctype = resp.headers.get("content-type", "")
         if not resp.ok:
             return f"error: HTTP {resp.status} for {url}"
@@ -187,7 +203,7 @@ class Browser:
         m = re.search(r"filename\*=(?:UTF-8'')?([^;]+)", cd, re.I) or re.search(r'filename="?([^";]+)"?', cd, re.I)
         if m:
             name = urllib.parse.unquote(m.group(1).strip())
-        name = Path(name or urllib.parse.unquote(urllib.parse.urlparse(url).path)).name or "download.bin"
+        name = safe_name(Path(name or urllib.parse.unquote(urllib.parse.urlparse(url).path)).name or "download.bin")
         out_dir = Path(q.get("out") or DOWNLOADS).expanduser()
         out_dir.mkdir(parents=True, exist_ok=True)
         dest = out_dir / name

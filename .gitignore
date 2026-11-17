@@ -2,3 +2,5 @@ __pycache__/
 *.png
 profile-ff/
 .venv/
+__pycache__/
+.pytest_cache/
